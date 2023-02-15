@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from update import BasicUpdateBlock, SmallUpdateBlock, LookupMapper
+from update import BasicUpdateBlock, SmallUpdateBlock, LookupScaler
 from extractor import BasicEncoder, SmallEncoder, CoordinateAttention
 from corr import CorrBlock, AlternateCorrBlock
 from utils.utils import bilinear_sampler, coords_grid, upflow8
@@ -22,11 +22,9 @@ except:
 
 
 class RAFT(nn.Module):
-    def __init__(self, args, custom_lookup=True):
+    def __init__(self, args):
         super(RAFT, self).__init__()
         self.args = args
-        # Should move this into `args' eventually
-        self.custom_lookup = custom_lookup
 
         if args.small:
             self.hidden_dim = hdim = 96
@@ -51,16 +49,15 @@ class RAFT(nn.Module):
             self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=args.dropout)        
             self.coor_att = None
             self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
+            self.lookup_scaler = None
             self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
 
         else:
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
             self.coor_att = CoordinateAttention(feature_size=256, enc_size=128)
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
-            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
-        
-        self.lookup_mapper = LookupMapper(r=args.corr_radius, input_dim=4*hdim,
-                                            output_size=(2*self.args.corr_radius+1)**2)
+            self.lookup_scaler = LookupScaler(input_dim=4*hdim, output_size=args.corr_levels)
+            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*2)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -118,9 +115,9 @@ class RAFT(nn.Module):
         # run the context network
         with autocast(enabled=self.args.mixed_precision):
             cnet = self.cnet(image1)
-            net, inp = torch.split(cnet, [hdim, cdim], dim=1)
+            net, base_inp = torch.split(cnet, [hdim, cdim], dim=1)
             net = torch.tanh(net)
-            inp = torch.relu(inp)
+            base_inp = torch.relu(base_inp)
 
         coords0, coords1 = self.initialize_flow(image1)
 
@@ -131,17 +128,17 @@ class RAFT(nn.Module):
         for itr in range(iters):
             coords1 = coords1.detach()
 
-            # Do context aware lookup
-            if self.custom_lookup:
-                lookup_context = torch.cat([torch.amax(inp, dim=(2, 3)),
-                                            torch.amin(inp, dim=(2, 3)),
+            lookup_scalers = None
+            if self.lookup_scaler is not None:
+                lookup_context = torch.cat([torch.amax(base_inp, dim=(2, 3)),
+                                            torch.amin(base_inp, dim=(2, 3)),
                                             torch.amax(net, dim=(2, 3)),
                                             torch.amin(net, dim=(2, 3))], dim=-1).type(torch.float32)
-                custom_lookup = self.lookup_mapper(lookup_context)
-            else:
-                custom_lookup = None
-
-            corr = corr_fn(coords1, custom_coords=custom_lookup) # index correlation volume
+                lookup_scalers = self.lookup_scaler(lookup_context)
+                cat_lookup_scalers = lookup_scalers.view(-1, lookup_scalers.shape[-1] * lookup_scalers.shape[-2], 1, 1)
+                cat_lookup_scalers = cat_lookup_scalers.expand(-1, -1, base_inp.shape[2], base_inp.shape[3])
+                inp = torch.cat([base_inp, cat_lookup_scalers], dim=1)
+            corr = corr_fn(coords1, scalers=lookup_scalers) # index correlation volume
 
             flow = coords1 - coords0
             with autocast(enabled=self.args.mixed_precision):

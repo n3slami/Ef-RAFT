@@ -26,11 +26,12 @@ class CorrBlock:
             corr = F.avg_pool2d(corr, 2, stride=2)
             self.corr_pyramid.append(corr)
 
-    def __call__(self, coords, custom_coords=None):
+    def __call__(self, coords, scalers=None):
         r = self.radius
 
-        if custom_coords is not None:
-            assert(custom_coords.shape[-2] == (2 * r + 1) ** 2)
+        if scalers is not None:
+            assert(scalers.shape[-1] == 2 and scalers.shape[-2] == self.num_levels)
+            scalers = scalers.view(-1, 1, scalers.shape[-2], scalers.shape[-1])
 
         coords = coords.permute(0, 2, 3, 1)
         batch, h1, w1, _ = coords.shape
@@ -38,19 +39,19 @@ class CorrBlock:
         out_pyramid = []
         for i in range(self.num_levels):
             corr = self.corr_pyramid[i]
-            centroid_lvl = coords.reshape(batch*h1*w1, 1, 1, 2) / 2**i
+            centroid_lvl = coords.reshape(batch, h1*w1, 1, 1, 2) / 2**i
             dx = torch.linspace(-r, r, 2*r+1, device=coords.device)
             dy = torch.linspace(-r, r, 2*r+1, device=coords.device)
             delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
-            if custom_coords is None:
-                delta_lvl = delta.view(1, 2*r+1, 2*r+1, 2)
-                coords_lvl = centroid_lvl + delta_lvl
-            else:
-                centroid_lvl = centroid_lvl.view(batch, h1 * w1, 1, 1, 2)
-                delta_lvl = custom_coords.view(-1, 1, 2 * r + 1, 2 * r + 1, 2) \
-                            + delta.view(1, 1, 2*r+1, 2*r+1, 2)
-                coords_lvl = centroid_lvl + delta_lvl
-                coords_lvl = coords_lvl.view(-1, 2 * r + 1, 2 * r + 1, 2)
+            delta = delta.view(-1, 2)
+            delta = delta.repeat((batch, 1, 1))
+            if scalers is not None:
+                delta[..., 0] *= scalers[..., i, 0]
+                delta[..., 1] *= scalers[..., i, 1]
+            delta_lvl = delta.view(batch, 1, 2*r+1, 2*r+1, 2)
+            coords_lvl = centroid_lvl + delta_lvl
+
+            coords_lvl = coords_lvl.reshape(-1, coords_lvl.shape[-3], coords_lvl.shape[-2], coords_lvl.shape[-1])
 
             corr = bilinear_sampler(corr, coords_lvl)
             corr = corr.view(batch, h1, w1, -1)
