@@ -136,13 +136,14 @@ class BasicUpdateBlock(nn.Module):
         return net, mask, delta_flow
 
 class LookupMapper(nn.Module):
-    def __init__(self, input_dim=512, output_size=81, output_dim=2):
+    def __init__(self, r, input_dim=512, output_size=81, output_dim=2):
         super(LookupMapper, self).__init__()
+        self.scaling_factor = 0.5 * r
         self.input_dim = input_dim
         self.output_size = output_size
         self.output_dim = output_dim
 
-        REDUCTION_FACTOR = 1.5
+        REDUCTION_FACTOR = 2
         layers = []
         old_layer_size = input_dim
         new_layer_size = int(input_dim / REDUCTION_FACTOR)
@@ -159,5 +160,5 @@ class LookupMapper(nn.Module):
     
     def forward(self, inp):
         assert(inp.shape[-1] == self.input_dim)
-        return self.model(inp).view(-1, self.output_size, self.output_dim)
+        return self.model(inp).view(-1, self.output_size, self.output_dim) * self.scaling_factor
 
