@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from update import BasicUpdateBlock, SmallUpdateBlock
+from update import BasicUpdateBlock, SmallUpdateBlock, LookupMapper
 from extractor import BasicEncoder, SmallEncoder, CoordinateAttention
 from corr import CorrBlock, AlternateCorrBlock
 from utils.utils import bilinear_sampler, coords_grid, upflow8
@@ -22,9 +22,11 @@ except:
 
 
 class RAFT(nn.Module):
-    def __init__(self, args):
+    def __init__(self, args, custom_lookup=True):
         super(RAFT, self).__init__()
         self.args = args
+        # Should move this into `args' eventually
+        self.custom_lookup = custom_lookup
 
         if args.small:
             self.hidden_dim = hdim = 96
@@ -56,6 +58,8 @@ class RAFT(nn.Module):
             self.coor_att = CoordinateAttention(feature_size=256, enc_size=128)
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
+        
+        self.lookup_mapper = LookupMapper(input_dim=4*hdim, output_size=(2*self.args.corr_radius+1))
 
     def freeze_bn(self):
         for m in self.modules():
@@ -125,7 +129,18 @@ class RAFT(nn.Module):
         flow_predictions = []
         for itr in range(iters):
             coords1 = coords1.detach()
-            corr = corr_fn(coords1) # index correlation volume
+
+            # Do context aware lookup
+            if self.custom_lookup:
+                lookup_context = torch.cat([torch.amax(inp, dim=(2, 3)),
+                                            torch.amin(inp, dim=(2, 3)),
+                                            torch.amax(net, dim=(2, 3)),
+                                            torch.amin(net, dim=(2, 3))], dim=-1)
+                custom_lookup = self.lookup_mapper(lookup_context)
+            else:
+                custom_lookup = None
+
+            corr = corr_fn(coords1, custom_coords=custom_lookup) # index correlation volume
 
             flow = coords1 - coords0
             with autocast(enabled=self.args.mixed_precision):

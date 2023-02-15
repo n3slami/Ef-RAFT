@@ -26,21 +26,33 @@ class CorrBlock:
             corr = F.avg_pool2d(corr, 2, stride=2)
             self.corr_pyramid.append(corr)
 
-    def __call__(self, coords):
+    def __call__(self, coords, custom_coords=None):
         r = self.radius
+
+        if custom_coords is not None:
+            assert(custom_coords.shape[-2] == (2 * r + 1) ** 2)
+
         coords = coords.permute(0, 2, 3, 1)
         batch, h1, w1, _ = coords.shape
 
         out_pyramid = []
         for i in range(self.num_levels):
             corr = self.corr_pyramid[i]
-            dx = torch.linspace(-r, r, 2*r+1, device=coords.device)
-            dy = torch.linspace(-r, r, 2*r+1, device=coords.device)
-            delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
+            if custom_coords is None:
+                dx = torch.linspace(-r, r, 2*r+1, device=coords.device)
+                dy = torch.linspace(-r, r, 2*r+1, device=coords.device)
+                delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
 
-            centroid_lvl = coords.reshape(batch*h1*w1, 1, 1, 2) / 2**i
-            delta_lvl = delta.view(1, 2*r+1, 2*r+1, 2)
-            coords_lvl = centroid_lvl + delta_lvl
+                centroid_lvl = coords.reshape(batch*h1*w1, 1, 1, 2) / 2**i
+                delta_lvl = delta.view(1, 2*r+1, 2*r+1, 2)
+                coords_lvl = centroid_lvl + delta_lvl
+            else:
+                # Custom coords are in the range [-1, 1], so we should change it to map
+                # into the actual image. This is sort of redundant, since it is undone later
+                # anyway, but helps with reusing RAFT's own `bilinear_sample' method.
+                coords_lvl = custom_coords.view(1, 2 * r + 1, 2 * r + 1, 2)
+                coords_lvl[:, :, 0] = (coords_lvl[:, :, 0] + 1) / 2.0 * h1
+                coords_lvl[:, :, 1] = (coords_lvl[:, :, 1] + 1) / 2.0 * w1
 
             corr = bilinear_sampler(corr, coords_lvl)
             corr = corr.view(batch, h1, w1, -1)
