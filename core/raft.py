@@ -59,8 +59,8 @@ class RAFT(nn.Module):
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
         
-        self.lookup_mapper = LookupMapper(r=args.corr_radius, input_dim=4*hdim,
-                                            output_size=(2*self.args.corr_radius+1)**2)
+        self.lookup_mapper = LookupMapper(r=args.corr_radius, input_dim=2*hdim,
+                                            output_size=2*(2*self.args.corr_radius+1)**2)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -133,11 +133,7 @@ class RAFT(nn.Module):
 
             # Do context aware lookup
             if self.custom_lookup:
-                lookup_context = torch.cat([torch.amax(inp, dim=(2, 3)),
-                                            torch.amin(inp, dim=(2, 3)),
-                                            torch.amax(net, dim=(2, 3)),
-                                            torch.amin(net, dim=(2, 3))], dim=-1).type(torch.float32)
-                custom_lookup = self.lookup_mapper(lookup_context)
+                custom_lookup = self.lookup_mapper(torch.cat([net, inp], dim=1).type(torch.float32))
             else:
                 custom_lookup = None
 

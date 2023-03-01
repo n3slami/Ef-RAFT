@@ -136,29 +136,25 @@ class BasicUpdateBlock(nn.Module):
         return net, mask, delta_flow
 
 class LookupMapper(nn.Module):
-    def __init__(self, r, input_dim=512, output_size=81, output_dim=2):
+    def __init__(self, r, input_dim=512, output_size=81*2, output_dim=2):
         super(LookupMapper, self).__init__()
-        self.scaling_factor = 0.5 * r
+        self.scaling_factor = r
         self.input_dim = input_dim
         self.output_size = output_size
         self.output_dim = output_dim
 
-        REDUCTION_FACTOR = 2
-        layers = []
-        old_layer_size = input_dim
-        new_layer_size = int(input_dim / REDUCTION_FACTOR)
-        while new_layer_size > output_dim * output_size:
-            layers.append(nn.Linear(old_layer_size, new_layer_size))
-            layers.append(nn.BatchNorm1d(new_layer_size))
-            layers.append(nn.LeakyReLU())
-            old_layer_size = new_layer_size
-            new_layer_size = int(new_layer_size / REDUCTION_FACTOR)
-        layers.append(nn.Linear(old_layer_size, output_dim * output_size))
-        layers.append(nn.Tanh())
-
-        self.model = nn.Sequential(*layers)
+        POOLING_SIZE = 99
+        self.model_head = nn.Sequential(nn.Conv2d(input_dim, input_dim, 1),
+                                        nn.BatchNorm2d(input_dim),
+                                        nn.ReLU())
+        self.max_pool = nn.MaxPool2d(POOLING_SIZE, 1, (POOLING_SIZE - 1) // 2)
+        self.model_tail = nn.Sequential(nn.Conv2d(2 * input_dim, output_dim * output_size, 1),
+                                        nn.Tanh())
     
     def forward(self, inp):
-        assert(inp.shape[-1] == self.input_dim)
-        return self.model(inp).view(-1, self.output_size, self.output_dim) * self.scaling_factor
+        assert(inp.shape[1] == self.input_dim)
+        tmp = self.model_head(inp)
+        mx = self.max_pool(tmp)
+        mn = -self.max_pool(-tmp)
+        return self.model_tail(torch.cat([mx, mn], dim=1).type(torch.float32)) * self.scaling_factor
 
