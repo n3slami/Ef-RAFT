@@ -19,6 +19,7 @@ class CorrBlock:
         corr = CorrBlock.corr(fmap1, fmap2)
 
         batch, h1, w1, dim, h2, w2 = corr.shape
+        self.corr_map = corr.view(batch, h1 * w1, h2 * w2)
         corr = corr.reshape(batch*h1*w1, dim, h2, w2)
         
         self.corr_pyramid.append(corr)
