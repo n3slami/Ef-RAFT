@@ -136,15 +136,24 @@ class BasicUpdateBlock(nn.Module):
         return net, mask, delta_flow
 
 class LookupScaler(nn.Module):
-    def __init__(self, input_dim=512, output_size=4, output_dim=2):
+    def __init__(self, input_dim=128, output_size=4, output_dim=4):
         super(LookupScaler, self).__init__()
         self.input_dim = input_dim
         self.output_size = output_size
         self.output_dim = output_dim
-        self.model = nn.Sequential(nn.Linear(input_dim, output_dim * output_size),
+        self.convert_conv = nn.Conv2d(2 * input_dim, 2 * input_dim, 1)
+        self.model_scale = nn.Sequential(nn.Linear(4 * input_dim, (output_dim // 2) * output_size),
+                                   nn.Sigmoid())
+        self.model_add = nn.Sequential(nn.Linear(4 * input_dim, (output_dim // 2) * output_size),
                                    nn.Sigmoid())
     
-    def forward(self, inp):
-        assert(inp.shape[-1] == self.input_dim)
-        return self.model(inp).view(-1, self.output_size, self.output_dim) + 1
+    def forward(self, context_map, hidden_state):
+        assert(context_map.shape[1] == self.input_dim)
+        assert(hidden_state.shape[1] == self.input_dim)
+        convert_map = self.convert_conv(torch.cat([context_map, hidden_state], dim=1).type(torch.float32))
+        lookup_context = torch.cat([torch.amax(convert_map, dim=(2, 3)),
+                                    torch.amin(convert_map, dim=(2, 3))], dim=-1).type(torch.float32)
+        scale = self.model_scale(lookup_context).view(-1, self.output_size, self.output_dim // 2) + 1
+        add = self.model_add(lookup_context).view(-1, self.output_size, self.output_dim // 2)
+        return torch.cat([scale, add], dim=-1)
 

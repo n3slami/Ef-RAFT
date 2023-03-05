@@ -31,8 +31,8 @@ class CorrBlock:
         r = self.radius
 
         if scalers is not None:
-            assert(scalers.shape[-1] == 2 and scalers.shape[-2] == self.num_levels)
-            scalers = scalers.view(-1, 1, scalers.shape[-2], scalers.shape[-1])
+            assert(scalers.shape[-1] == 4 and scalers.shape[-2] == self.num_levels)
+            scalers = scalers.view(-1, 1, scalers.shape[-2], 2, scalers.shape[-1] // 2)
 
         coords = coords.permute(0, 2, 3, 1)
         batch, h1, w1, _ = coords.shape
@@ -47,8 +47,10 @@ class CorrBlock:
             delta = delta.view(-1, 2)
             delta = delta.repeat((batch, 1, 1))
             if scalers is not None:
-                delta[..., 0] *= scalers[..., i, 0]
-                delta[..., 1] *= scalers[..., i, 1]
+                delta[..., 0] *= scalers[..., i, 0, 0]
+                delta[..., 1] *= scalers[..., i, 0, 1]
+                delta[..., 0] += torch.sign(delta[..., 0]) * scalers[..., i, 1, 0] * r
+                delta[..., 1] += torch.sign(delta[..., 1]) * scalers[..., i, 1, 1] * r
             delta_lvl = delta.view(batch, 1, 2*r+1, 2*r+1, 2)
             coords_lvl = centroid_lvl + delta_lvl
 

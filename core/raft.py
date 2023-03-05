@@ -56,8 +56,8 @@ class RAFT(nn.Module):
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
             self.coor_att = CoordinateAttention(feature_size=256, enc_size=128)
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
-            self.lookup_scaler = LookupScaler(input_dim=4*hdim, output_size=args.corr_levels)
-            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*2)
+            self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels)
+            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*4)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -154,11 +154,7 @@ class RAFT(nn.Module):
 
             lookup_scalers = None
             if self.lookup_scaler is not None:
-                lookup_context = torch.cat([torch.amax(base_inp, dim=(2, 3)),
-                                            torch.amin(base_inp, dim=(2, 3)),
-                                            torch.amax(net, dim=(2, 3)),
-                                            torch.amin(net, dim=(2, 3))], dim=-1).type(torch.float32)
-                lookup_scalers = self.lookup_scaler(lookup_context)
+                lookup_scalers = self.lookup_scaler(base_inp, net)
                 cat_lookup_scalers = lookup_scalers.view(-1, lookup_scalers.shape[-1] * lookup_scalers.shape[-2], 1, 1)
                 cat_lookup_scalers = cat_lookup_scalers.expand(-1, -1, base_inp.shape[2], base_inp.shape[3])
                 inp = torch.cat([base_inp, cat_lookup_scalers], dim=1)
