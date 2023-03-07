@@ -125,19 +125,20 @@ torch::Tensor match_propagate_cuda_forward(
     torch::Tensor corr,
     torch::Tensor direction)
 {
-  const auto batch_size = matching.size(0);
-  const auto max_diag_size = max(matching.size(1), matching.size(2));
+    const auto batch_size = matching.size(0);
+    const auto max_diag_size = max(matching.size(1), matching.size(2));
 
-  const int threads = 1024;
-  const dim3 blocks((max_diag_size + threads - 1) / threads, batch_size);
+    const int threads = 1024;
+    const dim3 blocks((max_diag_size + threads - 1) / threads, batch_size);
 
-  AT_DISPATCH_FLOATING_TYPES(corr.type(), "match_propagate_cuda_forward", ([&]
+    AT_DISPATCH_FLOATING_TYPES(corr.type(), "match_propagate_cuda_forward", ([&]
         {
             match_propagate_cuda_forward_kernel<scalar_t><<<blocks, threads, batch_size * sizeof(int)>>>(
                 matching.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
                 corr.packed_accessor32<scalar_t, 5, torch::RestrictPtrTraits>(),
                 direction.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>());
-        }));
+        })
+    );
 
-  return matching;
+    return matching;
 }

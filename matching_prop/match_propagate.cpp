@@ -28,6 +28,7 @@ torch::Tensor match_propagate_forward(
     return match_propagate_cuda_forward(matching, corr, direction);
 }
 
-PYBIND11_MODULE(TORCH_EXTENSION_NAME, m) {
-  m.def("forward", &match_propagate_forward, "Match propagation algorithm forward (CUDA)");
+PYBIND11_MODULE(TORCH_EXTENSION_NAME, m)
+{
+    m.def("forward", &match_propagate_forward, "Match propagation algorithm forward (CUDA)");
 }
