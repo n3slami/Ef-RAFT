@@ -8,6 +8,10 @@ from extractor import BasicEncoder, SmallEncoder, CoordinateAttention
 from corr import CorrBlock, AlternateCorrBlock
 from utils.utils import bilinear_sampler, coords_grid, upflow8
 
+from torch.utils.cpp_extension import load
+matching_prop = load(name="matching_prop", sources=["matching_prop/match_propagate.cpp",
+                                                    "matching_prop/match_propagate_kernel.cu"])
+
 try:
     autocast = torch.cuda.amp.autocast
 except:
@@ -146,6 +150,8 @@ class RAFT(nn.Module):
             coords_x = coords_index % fW
             coords_y = coords_index // fW
             coords1 = torch.stack([coords_x, coords_y], dim=1).float()
+            print(coords1.shape, corr_map.view(-1, fH, fW, fH, fW).shape)
+            coords1 = matching_prop.forward(coords1, corr_map.view(-1, fH, fW, fH, fW), torch.Tensor([1, 1]).cuda())
 
         # Iterative update
         flow_predictions = []

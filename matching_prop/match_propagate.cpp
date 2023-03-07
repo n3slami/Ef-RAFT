@@ -20,8 +20,9 @@ torch::Tensor match_propagate_forward(
     CHECK_INPUT(matching);
     CHECK_INPUT(corr);
     CHECK_INPUT(direction);
+    AT_ASSERTM(matching.size(1) == 2, "The matching tensor must have 2D matching information");
     AT_ASSERTM(direction.size(0) == 2, "The direction tensor must have shape (2)");
-    AT_ASSERTM(abs(direction[0].item<int>()) != 1 || abs(direction[1].item<int>()) != 1,
+    AT_ASSERTM(abs(direction[0].item<int>()) == 1 && abs(direction[1].item<int>()) == 1,
                 "The direction tensor only contain values of 1 and -1");
 
 

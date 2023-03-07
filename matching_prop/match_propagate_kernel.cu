@@ -34,8 +34,8 @@ __global__ void match_propagate_cuda_forward_kernel(
     extern __shared__ int diagonal_index[];
     // Index in diagonal for all grid threads
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
-    const int H = matching.size(1);
-    const int W = matching.size(2);
+    const int H = matching.size(3);
+    const int W = matching.size(4);
     const int total_diagonals = W + H;
     const int x_change = direction[0];
     const int y_change = direction[1];
@@ -60,7 +60,7 @@ __global__ void match_propagate_cuda_forward_kernel(
         {
             int disp_x, disp_y;
             scalar_t new_x, new_y;
-            scalar_t value = bilinear_interpolation(corr, n, x, y, matching[n][x][y][0], matching[n][x][y][1]);
+            scalar_t value = bilinear_interpolation(corr, n, x, y, matching[n][0][x][y], matching[n][1][x][y]);
             scalar_t new_value = value;
 
             // Handle X-wise displacement
@@ -68,8 +68,8 @@ __global__ void match_propagate_cuda_forward_kernel(
             disp_y = y;
             if ((0 <= disp_x && disp_x < H) && (0 <= disp_y && disp_y < W))
             {
-                new_x = matching[n][disp_x][disp_y][0];
-                new_y = matching[n][disp_x][disp_y][1];
+                new_x = matching[n][0][disp_x][disp_y];
+                new_y = matching[n][1][disp_x][disp_y];
 
                 // Check for out-of-bounds access
                 bool should_calc = false;
@@ -82,8 +82,8 @@ __global__ void match_propagate_cuda_forward_kernel(
                     if (new_value > value)
                     {
                         value = new_value;
-                        matching[n][x][y][0] = new_x;
-                        matching[n][x][y][1] = new_y;
+                        matching[n][0][x][y] = new_x;
+                        matching[n][1][x][y] = new_y;
                     }
                 }
             }
@@ -93,8 +93,8 @@ __global__ void match_propagate_cuda_forward_kernel(
             disp_y = y - y_change;
             if ((0 <= disp_x && disp_x < H) && (0 <= disp_y && disp_y < W))
             {
-                new_x = matching[n][disp_x][disp_y][0];
-                new_y = matching[n][disp_x][disp_y][1];
+                new_x = matching[n][0][disp_x][disp_y];
+                new_y = matching[n][1][disp_x][disp_y];
 
                 // Check for out-of-bounds access
                 bool should_calc = false;
@@ -107,8 +107,8 @@ __global__ void match_propagate_cuda_forward_kernel(
                     if (new_value > value)
                     {
                         value = new_value;
-                        matching[n][x][y][0] = new_x;
-                        matching[n][x][y][1] = new_y;
+                        matching[n][0][x][y] = new_x;
+                        matching[n][1][x][y] = new_y;
                     }
                 }
             }
@@ -126,7 +126,7 @@ torch::Tensor match_propagate_cuda_forward(
     torch::Tensor direction)
 {
     const auto batch_size = matching.size(0);
-    const auto max_diag_size = max(matching.size(1), matching.size(2));
+    const auto max_diag_size = max(matching.size(2), matching.size(3));
 
     const int threads = 1024;
     const dim3 blocks((max_diag_size + threads - 1) / threads, batch_size);
