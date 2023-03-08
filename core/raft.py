@@ -6,11 +6,8 @@ import torch.nn.functional as F
 from update import BasicUpdateBlock, SmallUpdateBlock, LookupScaler
 from extractor import BasicEncoder, SmallEncoder, CoordinateAttention
 from corr import CorrBlock, AlternateCorrBlock
+from propagator import MatchingPropagator
 from utils.utils import bilinear_sampler, coords_grid, upflow8
-
-from torch.utils.cpp_extension import load
-matching_prop = load(name="matching_prop", sources=["matching_prop/match_propagate.cpp",
-                                                    "matching_prop/match_propagate_kernel.cu"])
 
 try:
     autocast = torch.cuda.amp.autocast
@@ -55,6 +52,7 @@ class RAFT(nn.Module):
             self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
             self.lookup_scaler = None
             self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
+            self.matching_propagator = None
 
         else:
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
@@ -62,6 +60,7 @@ class RAFT(nn.Module):
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*4)
+            self.matching_propagator = MatchingPropagator()
 
     def freeze_bn(self):
         for m in self.modules():
@@ -150,8 +149,8 @@ class RAFT(nn.Module):
             coords_x = coords_index % fW
             coords_y = coords_index // fW
             coords1 = torch.stack([coords_x, coords_y], dim=1).float()
-            print(coords1.shape, corr_map.view(-1, fH, fW, fH, fW).shape)
-            coords1 = matching_prop.forward(coords1, corr_map.view(-1, fH, fW, fH, fW), torch.Tensor([1, 1]).cuda())
+            if self.matching_propagator:
+                coords1 = self.matching_propagator(coords1, corr_map.view(-1, fH, fW, fH, fW))
 
         # Iterative update
         flow_predictions = []

@@ -4,6 +4,8 @@
 #include <cuda_runtime.h>
 #include <cooperative_groups.h>
 
+#include <stdio.h>
+
 template <typename scalar_t>
 __device__ scalar_t bilinear_interpolation(
     const torch::PackedTensorAccessor32<scalar_t, 5, torch::RestrictPtrTraits> corr,
@@ -28,14 +30,17 @@ __global__ void match_propagate_cuda_forward_kernel(
 {
     // Used for grid-level synchronization
     cooperative_groups::grid_group grid = cooperative_groups::this_grid();
+
+    const float update_threshold_multiplier = 1.05;
+    
     // Batch Index
     const int n = blockIdx.y;
     // Track diagonal index for each batch
     extern __shared__ int diagonal_index[];
     // Index in diagonal for all grid threads
     const int c = blockIdx.x * blockDim.x + threadIdx.x;
-    const int H = matching.size(3);
-    const int W = matching.size(4);
+    const int H = matching.size(1);
+    const int W = matching.size(2);
     const int total_diagonals = W + H;
     const int x_change = direction[0];
     const int y_change = direction[1];
@@ -54,13 +59,15 @@ __global__ void match_propagate_cuda_forward_kernel(
     if (c == 0)
         diagonal_index[n] = 0;
     grid.sync();
+
     for ( ; diagonal_index[n] < total_diagonals; )
     {
         if ((0 <= x && x < H) && (0 <= y && y < W))
         {
+            // printf("HANDLING %d vs. %d %d %d: %f %f\n", threadIdx.x, n, x, y, matching[n][x][y][0], matching[n][x][y][1]);
             int disp_x, disp_y;
             scalar_t new_x, new_y;
-            scalar_t value = bilinear_interpolation(corr, n, x, y, matching[n][0][x][y], matching[n][1][x][y]);
+            scalar_t value = bilinear_interpolation<scalar_t>(corr, n, x, y, matching[n][x][y][0], matching[n][x][y][1]);
             scalar_t new_value = value;
 
             // Handle X-wise displacement
@@ -68,8 +75,8 @@ __global__ void match_propagate_cuda_forward_kernel(
             disp_y = y;
             if ((0 <= disp_x && disp_x < H) && (0 <= disp_y && disp_y < W))
             {
-                new_x = matching[n][0][disp_x][disp_y];
-                new_y = matching[n][1][disp_x][disp_y];
+                new_x = matching[n][disp_x][disp_y][0];
+                new_y = matching[n][disp_x][disp_y][1];
 
                 // Check for out-of-bounds access
                 bool should_calc = false;
@@ -78,12 +85,13 @@ __global__ void match_propagate_cuda_forward_kernel(
                 bool is_valid_lookup = (new_x != (scalar_t) disp_x || new_y != (scalar_t) disp_y);
                 if (should_calc && is_valid_lookup)
                 {
-                    new_value = bilinear_interpolation(corr, n, x, y, new_x + x_change, new_y);
-                    if (new_value > value)
+                    new_value = bilinear_interpolation<scalar_t>(corr, n, x, y, new_x + x_change, new_y);
+                    if (new_value > value * update_threshold_multiplier)
                     {
                         value = new_value;
-                        matching[n][0][x][y] = new_x;
-                        matching[n][1][x][y] = new_y;
+                        // printf("UPDATING @ %d %d %d: %f %f -> %f %f\n", n, x, y, matching[n][x][y][0], matching[n][x][y][1], new_x + x_change, new_y);
+                        matching[n][x][y][0] = new_x + x_change;
+                        matching[n][x][y][1] = new_y;
                     }
                 }
             }
@@ -93,8 +101,8 @@ __global__ void match_propagate_cuda_forward_kernel(
             disp_y = y - y_change;
             if ((0 <= disp_x && disp_x < H) && (0 <= disp_y && disp_y < W))
             {
-                new_x = matching[n][0][disp_x][disp_y];
-                new_y = matching[n][1][disp_x][disp_y];
+                new_x = matching[n][disp_x][disp_y][0];
+                new_y = matching[n][disp_x][disp_y][1];
 
                 // Check for out-of-bounds access
                 bool should_calc = false;
@@ -103,12 +111,13 @@ __global__ void match_propagate_cuda_forward_kernel(
                 bool is_valid_lookup = (new_x != (scalar_t) disp_x || new_y != (scalar_t) disp_y);
                 if (should_calc && is_valid_lookup)
                 {
-                    new_value = bilinear_interpolation(corr, n, x, y, new_x, new_y + y_change);
-                    if (new_value > value)
+                    new_value = bilinear_interpolation<scalar_t>(corr, n, x, y, new_x, new_y + y_change);
+                    if (new_value > value * update_threshold_multiplier)
                     {
                         value = new_value;
-                        matching[n][0][x][y] = new_x;
-                        matching[n][1][x][y] = new_y;
+                        // printf("UPDATING @ %d %d %d: %f %f -> %f %f\n", n, x, y, matching[n][x][y][0], matching[n][x][y][1], new_x, new_y + y_change);
+                        matching[n][x][y][0] = new_x;
+                        matching[n][x][y][1] = new_y + y_change;
                     }
                 }
             }
@@ -126,17 +135,23 @@ torch::Tensor match_propagate_cuda_forward(
     torch::Tensor direction)
 {
     const auto batch_size = matching.size(0);
-    const auto max_diag_size = max(matching.size(2), matching.size(3));
+    const auto max_diag_size = max(matching.size(1), matching.size(2));
 
     const int threads = 1024;
     const dim3 blocks((max_diag_size + threads - 1) / threads, batch_size);
+    
 
-    AT_DISPATCH_FLOATING_TYPES(corr.type(), "match_propagate_cuda_forward", ([&]
-        {
-            match_propagate_cuda_forward_kernel<scalar_t><<<blocks, threads, batch_size * sizeof(int)>>>(
-                matching.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>(),
-                corr.packed_accessor32<scalar_t, 5, torch::RestrictPtrTraits>(),
-                direction.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>());
+    AT_DISPATCH_FLOATING_TYPES(corr.type(), "match_propagate_cuda_forward", ([&]() {
+            auto matching_pa = matching.packed_accessor32<scalar_t, 4, torch::RestrictPtrTraits>();
+            auto corr_pa = corr.packed_accessor32<scalar_t, 5, torch::RestrictPtrTraits>();
+            auto direction_pa = direction.packed_accessor32<scalar_t, 1, torch::RestrictPtrTraits>();
+            void *args[4] = {&matching_pa, &corr_pa, &direction_pa, NULL};
+            size_t smem_size = batch_size * sizeof(int);
+            cudaStream_t stream = 0;
+            cudaLaunchCooperativeKernel((void *) match_propagate_cuda_forward_kernel<scalar_t>,
+                                        blocks, threads, (void **) args, smem_size, stream);
+            // match_propagate_cuda_forward_kernel<scalar_t><<<blocks, threads, smem_size>>>(
+            //     matching_pa, corr_pa, direction_pa);
         })
     );
 
