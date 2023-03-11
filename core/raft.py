@@ -52,6 +52,7 @@ class RAFT(nn.Module):
             self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
             self.lookup_scaler = None
             self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
+            self.should_use_matching_propagator = False
             self.matching_propagator = None
 
         else:
@@ -60,6 +61,7 @@ class RAFT(nn.Module):
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*4)
+            self.should_use_matching_propagator = True
             self.matching_propagator = MatchingPropagator()
 
     def freeze_bn(self):
@@ -133,24 +135,38 @@ class RAFT(nn.Module):
         else: # Use the global matching idea as an initialization.
             match_f, match_f_ind = soft_corr_map.max(dim=2) # Forward matching.
             match_b, match_b_ind = soft_corr_map.max(dim=1) # Backward matching.
+            match_f_perm = match_f.clone()
+            match_b_perm = match_b.clone()
 
             # Permute the backward softmax for match the forward.
             for i in range(BATCH_N):
                 match_b_tmp = match_b[i, ...]
-                match_b[i, ...] = match_b_tmp[match_f_ind[i, ...]]
+                match_b_perm[i, ...] = match_b_tmp[match_f_ind[i, ...]]
+
+                match_f_tmp = match_f[i, ...]
+                match_f_perm[i, ...] = match_f_tmp[match_b_ind[i, ...]]
             
             # Replace the identity mapping with the found matches.
-            matched = (match_f - match_b) == 0
-            coords_index = torch.arange(fH * fW).unsqueeze(0).repeat(BATCH_N, 1).to(soft_corr_map.device)
-            coords_index[matched] = match_f_ind[matched]
+            matched = (match_f - match_b_perm) == 0
+            coords_index_f = torch.arange(fH * fW).unsqueeze(0).repeat(BATCH_N, 1).to(soft_corr_map.device)
+            coords_index_f[matched] = match_f_ind[matched]
+            matched = (match_b - match_f_perm) == 0
+            coords_index_b = torch.arange(fH * fW).unsqueeze(0).repeat(BATCH_N, 1).to(soft_corr_map.device)
+            coords_index_b[matched] = match_b_ind[matched]
 
-            # Convert the 1D mapping to a 2D one.
-            coords_index = coords_index.reshape(BATCH_N, fH, fW)
-            coords_x = coords_index % fW
-            coords_y = coords_index // fW
-            coords1 = torch.stack([coords_x, coords_y], dim=1).float()
-            if self.matching_propagator:
-                coords1 = self.matching_propagator(coords1, corr_map.view(-1, fH, fW, fH, fW))
+            # Convert the 1D mappinga to 2D ones.
+            coords_index_f = coords_index_f.reshape(BATCH_N, fH, fW)
+            coords_index_b = coords_index_b.reshape(BATCH_N, fH, fW)
+            coords_x = coords_index_f % fW
+            coords_y = coords_index_f // fW
+            coords_f = torch.stack([coords_x, coords_y], dim=1).float()
+            coords_x = coords_index_b % fW
+            coords_y = coords_index_b // fW
+            coords_b = torch.stack([coords_x, coords_y], dim=1).float()
+
+            coords1 = coords_f
+            if self.should_use_matching_propagator and self.matching_propagator:
+                coords1 = self.matching_propagator(coords_f, coords_b, corr_map.view(-1, fH, fW, fH, fW))
 
         # Iterative update
         flow_predictions = []
