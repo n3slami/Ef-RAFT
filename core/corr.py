@@ -27,6 +27,16 @@ class CorrBlock:
             corr = F.avg_pool2d(corr, 2, stride=2)
             self.corr_pyramid.append(corr)
 
+    @staticmethod
+    def __get_delta_circles():
+        LOOKUP_COUNTS = [1, 4, 13, 19, 26, 18]
+        res = []
+        for r, count in enumerate(LOOKUP_COUNTS):
+            theta = torch.linspace(0, 2 * torch.pi, count + 1).cuda()[:-1]
+            x, y = r * torch.cos(theta), r * torch.sin(theta)
+            res.append(torch.stack([y, x], axis=1))
+        return torch.cat(res, dim=0).detach()
+
     def __call__(self, coords, scalers=None):
         r = self.radius
 
@@ -41,10 +51,11 @@ class CorrBlock:
         for i in range(self.num_levels):
             corr = self.corr_pyramid[i]
             centroid_lvl = coords.reshape(batch, h1*w1, 1, 1, 2) / 2**i
-            dx = torch.linspace(-r, r, 2*r+1, device=coords.device)
-            dy = torch.linspace(-r, r, 2*r+1, device=coords.device)
-            delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
-            delta = delta.view(-1, 2)
+            # dx = torch.linspace(-r, r, 2*r+1, device=coords.device)
+            # dy = torch.linspace(-r, r, 2*r+1, device=coords.device)
+            # delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
+            # delta = delta.view(-1, 2)
+            delta = CorrBlock.__get_delta_circles()
             delta = delta.repeat((batch, 1, 1))
             if scalers is not None:
                 delta[..., 0] *= scalers[..., i, 0, 0]
