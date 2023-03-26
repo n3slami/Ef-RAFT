@@ -155,9 +155,11 @@ class RAFT(nn.Module):
             lookup_scalers = None
             if self.lookup_scaler is not None:
                 lookup_scalers = self.lookup_scaler(base_inp, net)
-                cat_lookup_scalers = lookup_scalers.view(-1, lookup_scalers.shape[-1] * lookup_scalers.shape[-2], 1, 1)
-                cat_lookup_scalers = cat_lookup_scalers.expand(-1, -1, base_inp.shape[2], base_inp.shape[3])
-                inp = torch.cat([base_inp, cat_lookup_scalers], dim=1)
+                # cat_lookup_scalers = lookup_scalers.view(-1, lookup_scalers.shape[-1] * lookup_scalers.shape[-2], 1, 1)
+                # cat_lookup_scalers = cat_lookup_scalers.expand(-1, -1, base_inp.shape[2], base_inp.shape[3])
+                collapsed_lookup_scalers = lookup_scalers.view(-1, lookup_scalers.shape[1] * lookup_scalers.shape[2],
+                                                                   lookup_scalers.shape[3], lookup_scalers.shape[4])
+                inp = torch.cat([base_inp, collapsed_lookup_scalers], dim=1)
             
             corr = corr_fn(coords1, scalers=lookup_scalers) # index correlation volume
 

@@ -142,18 +142,21 @@ class LookupScaler(nn.Module):
         self.output_size = output_size
         self.output_dim = output_dim
         self.convert_conv = nn.Conv2d(2 * input_dim, 2 * input_dim, 1)
-        self.model_scale = nn.Sequential(nn.Linear(4 * input_dim, (output_dim // 2) * output_size),
-                                   nn.Sigmoid())
-        self.model_add = nn.Sequential(nn.Linear(4 * input_dim, (output_dim // 2) * output_size),
-                                   nn.Sigmoid())
+        self.model_scale = nn.Sequential(nn.Conv2d(2 * input_dim, (output_dim // 2) * output_size, 1),
+                                         nn.Sigmoid())
+        self.model_add  = nn.Sequential(nn.Conv2d(2 * input_dim, (output_dim // 2) * output_size, 1),
+                                         nn.Sigmoid())
     
     def forward(self, context_map, hidden_state):
         assert(context_map.shape[1] == self.input_dim)
         assert(hidden_state.shape[1] == self.input_dim)
         convert_map = self.convert_conv(torch.cat([context_map, hidden_state], dim=1).type(torch.float32))
-        lookup_context = torch.cat([torch.amax(convert_map, dim=(2, 3)),
-                                    torch.amin(convert_map, dim=(2, 3))], dim=-1).type(torch.float32)
-        scale = self.model_scale(lookup_context).view(-1, self.output_size, self.output_dim // 2) + 1
-        add = self.model_add(lookup_context).view(-1, self.output_size, self.output_dim // 2)
-        return torch.cat([scale, add], dim=-1)
+        # lookup_context = torch.cat([torch.amax(convert_map, dim=(2, 3)),
+        #                             torch.amin(convert_map, dim=(2, 3))], dim=-1).type(torch.float32)
+        H, W = convert_map.shape[-2], convert_map.shape[-1]
+        scale = self.model_scale(convert_map)
+        scale = scale.view(-1, self.output_size, self.output_dim // 2, H, W) + 1
+        add = self.model_add(convert_map)
+        add = add.view(-1, self.output_size, self.output_dim // 2, H, W)
+        return torch.cat([scale, add], dim=2)
 
