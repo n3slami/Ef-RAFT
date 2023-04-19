@@ -31,7 +31,7 @@ class CorrBlock:
         r = self.radius
 
         if transformations is not None:
-            assert(transformations.shape[-1] == 5 and transformations.shape[-2] == self.num_levels)
+            assert(transformations.shape[-1] == 6 and transformations.shape[-2] == self.num_levels)
             transformations = transformations.view(-1, 1, transformations.shape[-2], transformations.shape[-1])
 
         coords = coords.permute(0, 2, 3, 1)
@@ -47,13 +47,13 @@ class CorrBlock:
             delta = delta.view(-1, 2)
             delta = delta.repeat((batch, 1, 1))
             if transformations is not None:
-                # print(f"TRANSFORMATIONS at {i}", transformations[..., i])
+                # print(f"TRANSFORMATIONS at {i}", transformations[..., i, :])
                 delta[..., 0] *= transformations[..., i, 0]
                 delta[..., 1] *= transformations[..., i, 1]
                 delta[..., 0] += torch.sign(delta[..., 0]) * transformations[..., i, 2] * r
                 delta[..., 1] += torch.sign(delta[..., 1]) * transformations[..., i, 3] * r
-                s = torch.sin(transformations[..., i, 4])
-                c = torch.cos(transformations[..., i, 4])
+                s = transformations[..., i, 4]
+                c = transformations[..., i, 5]
                 # print(s.shape, c.shape)
                 rotation_mat_t = torch.concat([torch.stack([ c, s], dim=-1),
                                                torch.stack([-s, c], dim=-1)], dim=-2)

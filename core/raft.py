@@ -56,8 +56,9 @@ class RAFT(nn.Module):
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
             self.coor_att = CoordinateAttention(feature_size=256, enc_size=128)
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
-            self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels)
-            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*5)
+            LOOKUP_OUTPUT_DIM = 6
+            self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels, output_dim=LOOKUP_OUTPUT_DIM)
+            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*LOOKUP_OUTPUT_DIM)
 
     def freeze_bn(self):
         for m in self.modules():
