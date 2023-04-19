@@ -27,12 +27,12 @@ class CorrBlock:
             corr = F.avg_pool2d(corr, 2, stride=2)
             self.corr_pyramid.append(corr)
 
-    def __call__(self, coords, scalers=None):
+    def __call__(self, coords, transformations=None):
         r = self.radius
 
-        if scalers is not None:
-            assert(scalers.shape[-1] == 4 and scalers.shape[-2] == self.num_levels)
-            scalers = scalers.view(-1, 1, scalers.shape[-2], 2, scalers.shape[-1] // 2)
+        if transformations is not None:
+            assert(transformations.shape[-1] == 5 and transformations.shape[-2] == self.num_levels)
+            transformations = transformations.view(-1, 1, transformations.shape[-2], transformations.shape[-1])
 
         coords = coords.permute(0, 2, 3, 1)
         batch, h1, w1, _ = coords.shape
@@ -46,11 +46,22 @@ class CorrBlock:
             delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
             delta = delta.view(-1, 2)
             delta = delta.repeat((batch, 1, 1))
-            if scalers is not None:
-                delta[..., 0] *= scalers[..., i, 0, 0]
-                delta[..., 1] *= scalers[..., i, 0, 1]
-                delta[..., 0] += torch.sign(delta[..., 0]) * scalers[..., i, 1, 0] * r
-                delta[..., 1] += torch.sign(delta[..., 1]) * scalers[..., i, 1, 1] * r
+            if transformations is not None:
+                # print(f"TRANSFORMATIONS at {i}", transformations[..., i])
+                delta[..., 0] *= transformations[..., i, 0]
+                delta[..., 1] *= transformations[..., i, 1]
+                delta[..., 0] += torch.sign(delta[..., 0]) * transformations[..., i, 2] * r
+                delta[..., 1] += torch.sign(delta[..., 1]) * transformations[..., i, 3] * r
+                s = torch.sin(transformations[..., i, 4])
+                c = torch.cos(transformations[..., i, 4])
+                # print(s.shape, c.shape)
+                rotation_mat_t = torch.concat([torch.stack([ c, s], dim=-1),
+                                               torch.stack([-s, c], dim=-1)], dim=-2)
+                # print(rotation_mat_t.shape, rotation_mat_t, "vs.", delta.shape)
+                # print("WOW", delta[:, 0, :])
+                delta = torch.matmul(delta, rotation_mat_t)
+                # print(delta.shape)
+                # print("WOW", delta[:, 0, :])
             delta_lvl = delta.view(batch, 1, 2*r+1, 2*r+1, 2)
             coords_lvl = centroid_lvl + delta_lvl
 
