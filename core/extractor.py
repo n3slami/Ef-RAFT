@@ -301,6 +301,10 @@ class CoordinateAttention(nn.Module):
         self.att = nn.MultiheadAttention(feature_size, heads, dropout=dropout, bias=bias,
                                             batch_first=True)
         self.pos_enc = PositionalEncoding(feature_size)
+        self.input_resizer_key = nn.Sequential(nn.Linear(feature_size + enc_size, feature_size),)
+                                            #    nn.ReLU()
+        self.input_resizer_query = nn.Sequential(nn.Linear(feature_size + enc_size, feature_size),)
+                                                #  nn.ReLU()
     
     def forward(self, x):
         assert len(x.shape) == 4
@@ -318,10 +322,27 @@ class CoordinateAttention(nn.Module):
         row_vals = self.pos_enc(torch.zeros_like(row_x).to(dev))
         col_vals = self.pos_enc(torch.zeros_like(col_x).to(dev))
 
+        # Add the positional encodings to the keys and queries and process using a residual connection
+        res_row_x = torch.cat([row_x, torch.clone(row_vals)[..., :self.enc_size]], dim=-1)
+        row_size = res_row_x.shape
+        res_row_x_k = self.input_resizer_key(res_row_x.view(-1, res_row_x.shape[-1])) \
+                            .view(row_size[0], row_size[1], self.feature_size)
+        res_row_x_q = self.input_resizer_query(res_row_x.view(-1, res_row_x.shape[-1])) \
+                            .view(row_size[0], row_size[1], self.feature_size)
+        # row_x += res_row_x
+
+        res_col_x = torch.cat([col_x, torch.clone(col_vals)[..., :self.enc_size]], dim=-1)
+        col_size = res_col_x.shape
+        res_col_x_k = self.input_resizer_key(res_col_x.view(-1, res_col_x.shape[-1])) \
+                            .view(col_size[0], col_size[1], self.feature_size)
+        res_col_x_q = self.input_resizer_query(res_col_x.view(-1, res_col_x.shape[-1])) \
+                            .view(col_size[0], col_size[1], self.feature_size)
+        # col_x += res_col_x
+
         # Calculate output, convert to relative, retain only `enc_size' position elements from each
-        row_res = self.pos_enc.to_relatvive(self.att(row_x, row_x, row_vals)[0])
+        row_res = self.pos_enc.to_relatvive(self.att(row_x + res_row_x_k, row_x + res_row_x_q, row_vals)[0])
         row_res = row_res.view(*c_shape)[:, :, :, :self.enc_size]
-        col_res = self.pos_enc.to_relatvive(self.att(col_x, col_x, col_vals)[0])
+        col_res = self.pos_enc.to_relatvive(self.att(col_x + res_col_x_k, col_x + res_col_x_q, col_vals)[0])
         col_res = col_res.reshape(c_shape[0], c_shape[2], c_shape[1], c_shape[3])[:, :, :, :self.enc_size]
         row_res = torch.permute(row_res, (0, 3, 1, 2))
         col_res = torch.permute(col_res, (0, 3, 2, 1))
