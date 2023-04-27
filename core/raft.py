@@ -4,7 +4,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from update import BasicUpdateBlock, SmallUpdateBlock, LookupScaler
-from extractor import BasicEncoder, SmallEncoder, CoordinateAttention
+from extractor import BasicEncoder, SmallEncoder, CoordinateSetAttention
 from corr import CorrBlock, AlternateCorrBlock
 from utils.utils import bilinear_sampler, coords_grid, upflow8
 
@@ -47,14 +47,14 @@ class RAFT(nn.Module):
         # feature network, context network, and update block
         if args.small:
             self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=args.dropout)        
-            self.coor_att = None
+            self.coor_set_att = None
             self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
             self.lookup_scaler = None
             self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
 
         else:
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
-            self.coor_att = CoordinateAttention(feature_size=256, enc_size=128)
+            self.coor_set_att = CoordinateSetAttention(feature_size=256, enc_size=64)
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
             self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels)
             self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*4)
@@ -102,8 +102,8 @@ class RAFT(nn.Module):
         # run the feature network
         with autocast(enabled=self.args.mixed_precision):
             fmap1, fmap2 = self.fnet([image1, image2])        
-            fmap1 = self.coor_att(fmap1)
-            fmap2 = self.coor_att(fmap2)
+            fmap1 = self.coor_set_att(fmap1)
+            fmap2 = self.coor_set_att(fmap2)
         
         fmap1 = fmap1.float()
         fmap2 = fmap2.float()

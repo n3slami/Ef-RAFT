@@ -1,6 +1,8 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import torchvision.transforms
+from torchvision.transforms.functional import rotate as rotate_tensor
 
 
 class ResidualBlock(nn.Module):
@@ -293,36 +295,74 @@ class PositionalEncoding(nn.Module):
         X[:, :, 1::2] = all_cos * cosx + all_sin * sinx
         return X
 
-class CoordinateAttention(nn.Module):
-    def __init__(self, feature_size=128, enc_size=128, heads=4, bias=True, dropout=0.0):
-        super(CoordinateAttention, self).__init__()
+class CoordinateSetAttention(nn.Module):
+    def __init__(self, feature_size=128, enc_size=64, heads=4, bias=True, dropout=0.0):
+        super(CoordinateSetAttention, self).__init__()
         self.feature_size = feature_size
-        self.enc_size = enc_size
+        self.enc_size = enc_size    # Final result will have a dimension of 4 * `enc_size`
         self.att = nn.MultiheadAttention(feature_size, heads, dropout=dropout, bias=bias,
                                             batch_first=True)
         self.pos_enc = PositionalEncoding(feature_size)
+    
+    def __get_attention_result(self, mat, final_shape, mask=None):
+        # Convert feature map to attention friendly format
+        mat = mat.reshape(-1, mat.shape[-2], self.feature_size)
+
+        # Get positional encoding
+        mat_vals = self.pos_enc(torch.zeros_like(mat).to(mat.device))
+
+        # Calculate output, convert to relative, retain only `enc_size' position elements from each
+        if mask is not None:
+            mask = mask.view(*((-1, ) + mask.shape[2:]))
+            mat_res = self.pos_enc.to_relatvive(self.att(mat, mat, mat_vals, key_padding_mask=mask)[0])
+        else:
+            mat_res = self.pos_enc.to_relatvive(self.att(mat, mat, mat_vals)[0])
+        mat_res = mat_res.reshape(*final_shape)[:, :, :, :self.enc_size]
+
+        return mat_res
     
     def forward(self, x):
         assert len(x.shape) == 4
         assert x.shape[1] == self.feature_size
 
-        c_shape = (x.shape[0], x.shape[2], x.shape[3], x.shape[1])
-        dev = x.device
-        # Convert feature map to attention friendly format
-        row_x = torch.permute(x, (0, 2, 3, 1)).to(dev)
-        row_x = row_x.reshape(-1, row_x.shape[-2], self.feature_size)
-        col_x = torch.permute(x, (0, 3, 2, 1)).to(dev)
-        col_x = col_x.reshape(-1, col_x.shape[-2], self.feature_size)
-        
-        # Get positional encoding
-        row_vals = self.pos_enc(torch.zeros_like(row_x).to(dev))
-        col_vals = self.pos_enc(torch.zeros_like(col_x).to(dev))
+        C_SHAPE = (x.shape[0], x.shape[2], x.shape[3], x.shape[1])
+        H, W = C_SHAPE[1], C_SHAPE[2]
+        PADDING_VALUES = (W // 2, W // 2, H // 2, H // 2)
+        C_ANGLE, CC_ANGLE = 45, -45
+        CHANNEL_PERMUTE = (0, 2, 3, 1)
+        REV_CHANNEL_PERMUTE = (0, 3, 1, 2)
 
-        # Calculate output, convert to relative, retain only `enc_size' position elements from each
-        row_res = self.pos_enc.to_relatvive(self.att(row_x, row_x, row_vals)[0])
-        row_res = row_res.view(*c_shape)[:, :, :, :self.enc_size]
-        col_res = self.pos_enc.to_relatvive(self.att(col_x, col_x, col_vals)[0])
-        col_res = col_res.reshape(c_shape[0], c_shape[2], c_shape[1], c_shape[3])[:, :, :, :self.enc_size]
-        row_res = torch.permute(row_res, (0, 3, 1, 2))
-        col_res = torch.permute(col_res, (0, 3, 2, 1))
-        return torch.cat((x, row_res, col_res), dim=1)
+        # Put channels in the last dimension and define helpers
+        row_x = torch.permute(x, CHANNEL_PERMUTE)
+        col_x = torch.permute(x, (0, 3, 2, 1))
+        padded_x = torch.nn.functional.pad(x, pad=PADDING_VALUES)
+        mask_x = torch.nn.functional.pad(torch.ones(*C_SHAPE[:-1], device=row_x.device), pad=PADDING_VALUES)
+
+        # Get the attention results
+        row_res = self.__get_attention_result(row_x, row_x.shape)   # Rows
+
+        col_res = self.__get_attention_result(col_x, col_x.shape)   # Columns
+        col_res = torch.permute(col_res, (0, 2, 1, 3))  # Make `col_res` similar to `row_res`
+        
+        rotated_x = torch.permute(rotate_tensor(padded_x, C_ANGLE), CHANNEL_PERMUTE)    # Clockwise rotation
+        rotated_mask = rotate_tensor(mask_x, C_ANGLE, interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+        c_rotated_res = self.__get_attention_result(rotated_x, rotated_x.shape, mask=rotated_mask)
+        # Get the actual corresponding part
+        c_rotated_res = torch.permute(c_rotated_res, REV_CHANNEL_PERMUTE)
+        c_rotated_res = rotate_tensor(c_rotated_res, -C_ANGLE)[..., PADDING_VALUES[2]:PADDING_VALUES[2] + H,
+                                                               PADDING_VALUES[0]:PADDING_VALUES[0] + W]
+        c_rotated_res = torch.permute(c_rotated_res, CHANNEL_PERMUTE)
+        
+        rotated_x = torch.permute(rotate_tensor(padded_x, CC_ANGLE), CHANNEL_PERMUTE)    # Counter-clockwise rotation
+        rotated_mask = rotate_tensor(mask_x, CC_ANGLE, interpolation=torchvision.transforms.InterpolationMode.NEAREST)
+        cc_rotated_res = self.__get_attention_result(rotated_x, rotated_x.shape, mask=rotated_mask)
+        # Get the actual corresponding part
+        cc_rotated_res = torch.permute(cc_rotated_res, REV_CHANNEL_PERMUTE)
+        cc_rotated_res = rotate_tensor(cc_rotated_res, -CC_ANGLE)[..., PADDING_VALUES[2]:PADDING_VALUES[2] + H,
+                                                               PADDING_VALUES[0]:PADDING_VALUES[0] + W]
+        cc_rotated_res = torch.permute(cc_rotated_res, CHANNEL_PERMUTE)
+        
+        # Concatenate results, sort, and setup the output
+        res = torch.stack([row_res, col_res, c_rotated_res, cc_rotated_res], dim=-2)
+        res = torch.sort(res, dim=-2).values.view(*(res.shape[:-2] + (-1, )))
+        return torch.cat((x, torch.permute(res, REV_CHANNEL_PERMUTE)), dim=1)
