@@ -300,6 +300,10 @@ class CoordinateAttention(nn.Module):
         self.enc_size = enc_size
         self.att = nn.MultiheadAttention(feature_size, heads, dropout=dropout, bias=bias,
                                             batch_first=True)
+        self.conv_scaler = nn.Sequential(nn.Conv2d(feature_size, 4, 3, 1, 1),
+                                         nn.ReLU(),
+                                         nn.Conv2d(4, 1, 3, 1, 1),
+                                         nn.Sigmoid())
         self.pos_enc = PositionalEncoding(feature_size)
     
     def forward(self, x):
@@ -325,4 +329,6 @@ class CoordinateAttention(nn.Module):
         col_res = col_res.reshape(c_shape[0], c_shape[2], c_shape[1], c_shape[3])[:, :, :, :self.enc_size]
         row_res = torch.permute(row_res, (0, 3, 1, 2))
         col_res = torch.permute(col_res, (0, 3, 2, 1))
-        return torch.cat((x, row_res, col_res), dim=1)
+
+        act_map = self.conv_scaler(x)
+        return torch.cat((x, row_res * act_map, col_res * act_map), dim=1)
