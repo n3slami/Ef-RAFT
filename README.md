@@ -51,7 +51,7 @@ and KITTI datasets, respectively.
 
 
  ## Citation
-If you use this repository for your research or wish to refer to our distillation method, please use the following BibTeX entry:
+If you use this repository for your research or wish to refer to our method, please use the following BibTeX entry:
 ```bibtex
 
 ```
