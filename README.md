@@ -1,4 +1,4 @@
-# RAFT
+# Ef-RAFT
 This repository contains the source code for [Ef-RAFT: Rethinking RAFT for Efficient Optical Flow](https://arxiv.org/pdf/2003.12039.pdf)<br/>
 
 <img src="Diagram.png">
