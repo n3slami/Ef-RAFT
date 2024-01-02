@@ -35,7 +35,7 @@ For training on the 2 GPUs run code below. Training logs will be written to the 
 ./train_standard.sh
 ```
 
-For runing on a signle RTX GPU, training can be accelerated using mixed precision. You can expect similiar results in this setting (1 GPU)
+For running on a signle RTX GPU, training can be accelerated using mixed precision. You can expect similiar results in this setting (1 GPU)
 ```Shell
 ./train_mixed.sh
 ```
