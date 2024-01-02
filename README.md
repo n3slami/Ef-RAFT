@@ -1,4 +1,14 @@
 # Ef-RAFT
+ 	
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/rethinking-raft-for-efficient-optical-flow/optical-flow-estimation-on-sintel-clean)](https://paperswithcode.com/sota/optical-flow-estimation-on-sintel-clean?p=rethinking-raft-for-efficient-optical-flow)
+
+
+ 	
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/rethinking-raft-for-efficient-optical-flow/optical-flow-estimation-on-kitti-2015-train)](https://paperswithcode.com/sota/optical-flow-estimation-on-kitti-2015-train?p=rethinking-raft-for-efficient-optical-flow)
+
+ 	
+[![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/rethinking-raft-for-efficient-optical-flow/optical-flow-estimation-on-sintel-final)](https://paperswithcode.com/sota/optical-flow-estimation-on-sintel-final?p=rethinking-raft-for-efficient-optical-flow)
+
 This repository contains the source code for [Ef-RAFT: Rethinking RAFT for Efficient Optical Flow](https://arxiv.org/pdf/2003.12039.pdf)<br/>
 
 <img src="Diagram.png">
