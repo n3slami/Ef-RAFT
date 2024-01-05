@@ -30,25 +30,25 @@ To evaluate/train RAFT, you will need to download the required datasets and put 
 * [KITTI](http://www.cvlibs.net/datasets/kitti/eval_scene_flow.php?benchmark=flow)
 
 ## How to run?
-For training on the 2 GPUs run code below. Training logs will be written to the `runs` which can be visualized using tensorboard
+For training on 2 GPUs run code below. Training logs will be written to the `runs` directory, which can be visualized using tensorboard.
 ```Shell
 ./train_standard.sh
 ```
 
-For running on a signle RTX GPU, training can be accelerated using mixed precision. You can expect similiar results in this setting (1 GPU)
+For running on a single RTX GPU, training can be accelerated using mixed precision. You can expect similiar results in this setting (1 GPU).
 ```Shell
 ./train_mixed.sh
 ```
 
-You can evaluate a trained model using `evaluate.py`
+You can evaluate a trained model using `evaluate.py`.
 ```Shell
 python evaluate.py --model=models/raft-things.pth --dataset=sintel --mixed_precision
 ```
 
 ### Quantitative Results
 Comparison of the proposed method with existing
-techniques on the Sintel and KITTI datasets. Gree, blue, and
-red colors denote the first, second, and third-best results.
+techniques on the Sintel and KITTI datasets. Metrics in green, blue, and
+red denote the first, second, and third-best results, respectively.
 <p align="center">
 <img src="Results.png" width="700" height="500">
 <p/>
