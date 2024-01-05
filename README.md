@@ -30,12 +30,12 @@ To evaluate/train RAFT, you will need to download the required datasets and put 
 * [KITTI](http://www.cvlibs.net/datasets/kitti/eval_scene_flow.php?benchmark=flow)
 
 ## How to run?
-For training on 2 GPUs run code below. Training logs will be written to the `runs` directory, which can be visualized using tensorboard.
+For training on 2 GPUs, run the following command. Training logs will be written to the `runs` directory, which can be visualized using tensorboard.
 ```Shell
 ./train_standard.sh
 ```
 
-For running on a single RTX GPU, training can be accelerated using mixed precision. You can expect similiar results in this setting (1 GPU).
+For running on a single RTX GPU, training can be accelerated using mixed precision, and can be done with the following command. You can expect similiar results in this setting (1 GPU).
 ```Shell
 ./train_mixed.sh
 ```
