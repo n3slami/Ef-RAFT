@@ -19,6 +19,7 @@ class CorrBlock:
         corr = CorrBlock.corr(fmap1, fmap2)
 
         batch, h1, w1, dim, h2, w2 = corr.shape
+        self.corr_map = corr.view(batch, h1 * w1, h2 * w2)
         corr = corr.reshape(batch*h1*w1, dim, h2, w2)
         
         self.corr_pyramid.append(corr)
@@ -26,21 +27,34 @@ class CorrBlock:
             corr = F.avg_pool2d(corr, 2, stride=2)
             self.corr_pyramid.append(corr)
 
-    def __call__(self, coords):
+    def __call__(self, coords, scalers=None):
         r = self.radius
+
+        if scalers is not None:
+            assert(scalers.shape[-1] == 4 and scalers.shape[-2] == self.num_levels)
+            scalers = scalers.view(-1, 1, scalers.shape[-2], 2, scalers.shape[-1] // 2)
+
         coords = coords.permute(0, 2, 3, 1)
         batch, h1, w1, _ = coords.shape
 
         out_pyramid = []
         for i in range(self.num_levels):
             corr = self.corr_pyramid[i]
+            centroid_lvl = coords.reshape(batch, h1*w1, 1, 1, 2) / 2**i
             dx = torch.linspace(-r, r, 2*r+1, device=coords.device)
             dy = torch.linspace(-r, r, 2*r+1, device=coords.device)
             delta = torch.stack(torch.meshgrid(dy, dx), axis=-1)
-
-            centroid_lvl = coords.reshape(batch*h1*w1, 1, 1, 2) / 2**i
-            delta_lvl = delta.view(1, 2*r+1, 2*r+1, 2)
+            delta = delta.view(-1, 2)
+            delta = delta.repeat((batch, 1, 1))
+            if scalers is not None:
+                delta[..., 0] *= scalers[..., i, 0, 0]
+                delta[..., 1] *= scalers[..., i, 0, 1]
+                delta[..., 0] += torch.sign(delta[..., 0]) * scalers[..., i, 1, 0] * r
+                delta[..., 1] += torch.sign(delta[..., 1]) * scalers[..., i, 1, 1] * r
+            delta_lvl = delta.view(batch, 1, 2*r+1, 2*r+1, 2)
             coords_lvl = centroid_lvl + delta_lvl
+
+            coords_lvl = coords_lvl.reshape(-1, coords_lvl.shape[-3], coords_lvl.shape[-2], coords_lvl.shape[-1])
 
             corr = bilinear_sampler(corr, coords_lvl)
             corr = corr.view(batch, h1, w1, -1)

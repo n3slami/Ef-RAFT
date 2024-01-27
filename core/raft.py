@@ -3,7 +3,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from update import BasicUpdateBlock, SmallUpdateBlock
+from update import BasicUpdateBlock, SmallUpdateBlock, LookupScaler
 from extractor import BasicEncoder, SmallEncoder, CoordinateAttention
 from corr import CorrBlock, AlternateCorrBlock
 from utils.utils import bilinear_sampler, coords_grid, upflow8
@@ -49,13 +49,15 @@ class RAFT(nn.Module):
             self.fnet = SmallEncoder(output_dim=128, norm_fn='instance', dropout=args.dropout)        
             self.coor_att = None
             self.cnet = SmallEncoder(output_dim=hdim+cdim, norm_fn='none', dropout=args.dropout)
+            self.lookup_scaler = None
             self.update_block = SmallUpdateBlock(self.args, hidden_dim=hdim)
 
         else:
             self.fnet = BasicEncoder(output_dim=256, norm_fn='instance', dropout=args.dropout)        
             self.coor_att = CoordinateAttention(feature_size=256, enc_size=128)
             self.cnet = BasicEncoder(output_dim=hdim+cdim, norm_fn='batch', dropout=args.dropout)
-            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim)
+            self.lookup_scaler = LookupScaler(input_dim=hdim, output_size=args.corr_levels)
+            self.update_block = BasicUpdateBlock(self.args, hidden_dim=hdim, input_dim=cdim+args.corr_levels*4)
 
     def freeze_bn(self):
         for m in self.modules():
@@ -113,19 +115,51 @@ class RAFT(nn.Module):
         # run the context network
         with autocast(enabled=self.args.mixed_precision):
             cnet = self.cnet(image1)
-            net, inp = torch.split(cnet, [hdim, cdim], dim=1)
+            net, base_inp = torch.split(cnet, [hdim, cdim], dim=1)
             net = torch.tanh(net)
-            inp = torch.relu(inp)
+            base_inp = torch.relu(base_inp)
 
         coords0, coords1 = self.initialize_flow(image1)
 
+        BATCH_N, fC, fH, fW = fmap1.shape
+        corr_map = corr_fn.corr_map
+        soft_corr_map = F.softmax(corr_map, dim=2) * F.softmax(corr_map, dim=1)
+
         if flow_init is not None:
             coords1 = coords1 + flow_init
+        else: # Use the global matching idea as an initialization.
+            match_f, match_f_ind = soft_corr_map.max(dim=2) # Forward matching.
+            match_b, match_b_ind = soft_corr_map.max(dim=1) # Backward matching.
 
+            # Permute the backward softmax for match the forward.
+            for i in range(BATCH_N):
+                match_b_tmp = match_b[i, ...]
+                match_b[i, ...] = match_b_tmp[match_f_ind[i, ...]]
+            
+            # Replace the identity mapping with the found matches.
+            matched = (match_f - match_b) == 0
+            coords_index = torch.arange(fH * fW).unsqueeze(0).repeat(BATCH_N, 1).to(soft_corr_map.device)
+            coords_index[matched] = match_f_ind[matched]
+
+            # Convert the 1D mapping to a 2D one.
+            coords_index = coords_index.reshape(BATCH_N, fH, fW)
+            coords_x = coords_index % fW
+            coords_y = coords_index // fW
+            coords1 = torch.stack([coords_x, coords_y], dim=1).float()
+
+        # Iterative update
         flow_predictions = []
         for itr in range(iters):
             coords1 = coords1.detach()
-            corr = corr_fn(coords1) # index correlation volume
+
+            lookup_scalers = None
+            if self.lookup_scaler is not None:
+                lookup_scalers = self.lookup_scaler(base_inp, net)
+                cat_lookup_scalers = lookup_scalers.view(-1, lookup_scalers.shape[-1] * lookup_scalers.shape[-2], 1, 1)
+                cat_lookup_scalers = cat_lookup_scalers.expand(-1, -1, base_inp.shape[2], base_inp.shape[3])
+                inp = torch.cat([base_inp, cat_lookup_scalers], dim=1)
+            
+            corr = corr_fn(coords1, scalers=lookup_scalers) # index correlation volume
 
             flow = coords1 - coords0
             with autocast(enabled=self.args.mixed_precision):
