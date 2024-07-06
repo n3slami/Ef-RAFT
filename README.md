@@ -63,11 +63,13 @@ and KITTI datasets, respectively.
  ## Citation
 If you use this repository for your research or wish to refer to our method, please use the following BibTeX entry:
 ```bibtex
-@article{eslami2024rethinking,
-  title={Rethinking RAFT for Efficient Optical Flow},
+@inproceedings{eslami2024rethinking,
+  title={Rethinking RAFT for efficient optical flow},
   author={Eslami, Navid and Arefi, Farnoosh and Mansourian, Amir M and Kasaei, Shohreh},
-  journal={arXiv preprint arXiv:2401.00833},
-  year={2024}
+  booktitle={2024 13th Iranian/3rd International Machine Vision and Image Processing Conference (MVIP)},
+  pages={1--7},
+  year={2024},
+  organization={IEEE}
 }
 ```
 
