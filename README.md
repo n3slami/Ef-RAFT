@@ -1,5 +1,8 @@
 # Ef-RAFT
- 	
+[![arXiv](https://img.shields.io/badge/arXiv-2401.00833-<COLOR>.svg)](https://arxiv.org/abs/2401.00833)
+![Stars](https://img.shields.io/github/stars/n3slami/Ef-RAFT?style=social)
+![Forks](https://img.shields.io/github/forks/n3slami/Ef-RAFT?style=social)
+  
 [![PWC](https://img.shields.io/endpoint.svg?url=https://paperswithcode.com/badge/rethinking-raft-for-efficient-optical-flow/optical-flow-estimation-on-sintel-clean)](https://paperswithcode.com/sota/optical-flow-estimation-on-sintel-clean?p=rethinking-raft-for-efficient-optical-flow)
 
 
